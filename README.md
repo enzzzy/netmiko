@@ -3,61 +3,65 @@ netmiko
 
 Multi-vendor library to simplify Paramiko SSH connections to network devices
 
-##### Under development -- needs more testing #####
+Python 2.6, 2.7, 3.3, 3.4  
+  
+  
+<br>
+##### Requires: #####
+Paramiko >= 1.13+ ( >=1.7.5+ if Python2)  
+scp >= 0.10.0  
+pytest (for unit tests)   
+pyyaml (for unit tests)   
+  
+  
+<br>  
+##### Supports: #####
+Cisco IOS  
+Cisco IOS-XE  
+Cisco ASA  
+Cisco NX-OS  
+Cisco IOS-XR  
+Cisco WLC (limited testing)  
+Arista vEOS  
+HP ProCurve  
+HP Comware (limited testing)  
+Juniper Junos  
+Brocade VDX (limited testing)  
+F5 LTM (experimental)  
+Huawei (limited testing)  
 
-Requires:  
-Paramiko >= 1.7.5  
-Python 2.6 or Python 2.7  
-pytest for unit tests (I used pytest 2.6.4)  
-
-Tested on:  
-Cisco 881 running IOS 15.4(2)T1  
-Cisco CSR1000V running IOS XE 03.13.01.S  
-Cisco ASA running 8.0(4)32  
-Cisco Nexus 5K  
-Cisco Nexus 5596UP NXOS Version 5.2.(1)N1(8b)  
-Cisco Nexus 7K  
-Cisco IOS XR ASR9K  
-Cisco IOS XRv  
-Cisco IOS Catalyst WS-C3750G Version 12.2(55)SE8  
-Arista vEOS running 4.12.3  
-HP ProCurve 2510-24  
-HP 2920 - Procurve Software Version WB.15.16.0005  
-HP 8206 zl - Procurve Software Version K.15.16.0005  
-HP 870 LSW - Comware Software Version 5.20.105  
-Juniper SRX100 running 12.1X44-D35.5  
-Juniper EX2200 running 12.3R3.4  
-Brocade VDX  
-F5 LTM (very limited testing)  
- 
    
+<br>      
+##### More detailed example: #####
+See https://pynet.twb-tech.com/blog/automation/netmiko.html  
+  
+  
+<br>      
 ##### Simple example: #####
 
 ```
->>> import netmiko
+>>> from netmiko import ConnectHandler
 
-# Create a dictionary representing the device
+# Create a dictionary representing the device.
 >>> cisco_881 = {
 ...     'device_type': 'cisco_ios',
 ...     'ip':   '10.10.10.10',
 ...     'username': 'test',
 ...     'password': 'password',
-...     'secret': 'secret',
-...     'verbose': False,
+...     'port' : 8022,          # optional, defaults to 22
+...     'secret': 'secret',     # optional, defaults to ''
+...     'verbose': False,       # optional, defaults to True
 ... }
-
-# Dynamically select the class to use based on the device_type
->>> SSHClass = netmiko.ssh_dispatcher(device_type=cisco_881['device_type'])
-
 # Supported device_types can be found at:
 # https://github.com/ktbyers/netmiko/blob/master/netmiko/ssh_dispatcher.py
+# (see CLASS_MAPPER keys)
 
 ```
 
 ```
-# Establish an SSH connection to the device pass in the device dictionary.
->>> net_connect = SSHClass(**cisco_881)
-                
+# Establish an SSH connection to the device by passing in the device dictionary.
+>>> net_connect = ConnectHandler(**cisco_881)
+
 ```
 
 ```
@@ -97,8 +101,10 @@ pynet-rtr1#
 ```
 
   
-<br>  
 <br>      
 ---    
 Kirk Byers  
+Python for Network Engineers  
 https://pynet.twb-tech.com
+
+ 

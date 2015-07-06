@@ -3,25 +3,23 @@
 import pytest
 import re
 
-import netmiko
+from netmiko import ConnectHandler
 from DEVICE_CREDS import *
-
 
 def setup_module(module):
 
     module.EXPECTED_RESPONSES = {
-        'enable_prompt' : 'twb-sf-hpsw1#',
-        'base_prompt'   : 'twb-sf-hpsw1',
-        'interface_ip'  : '10.220.88.10',
-        'config_mode'   : '(config)',
+        'base_prompt'   : 'vsr1000',
+        'router_prompt' : '<vsr1000>',
+        'interface_ip'  : '192.168.112.11',
+        'config_mode'   : '[vsr1000]',
     }
     
-    show_ver_command = 'show version'
-    multiple_line_command = 'show logging'
-    module.basic_command = 'show ip'
+    show_ver_command = 'display version'
+    multiple_line_command = 'display logbuffer'
+    module.basic_command = 'display ip interface brief'
     
-    SSHClass = netmiko.ssh_dispatcher(hp_procurve['device_type'])
-    net_connect = SSHClass(**hp_procurve)
+    net_connect = ConnectHandler(**hp_comware)
 
     module.show_version = net_connect.send_command(show_ver_command)
     module.multiple_line_output = net_connect.send_command(multiple_line_command, delay_factor=2)
@@ -29,23 +27,21 @@ def setup_module(module):
 
     module.base_prompt = net_connect.base_prompt
 
-    # Enable doesn't do anything on ProCurve
-    net_connect.enable()
-    module.enable_prompt = net_connect.find_prompt()
-
     # Enter config mode
     module.config_mode = net_connect.config_mode()
-
-    # Exit config mode
+    
+        # Exit config mode
     module.exit_config_mode = net_connect.exit_config_mode()
 
     # Send a set of config commands
-    config_commands = ['time timezone -420', 'time timezone -480', 
-            'time daylight-time-rule Continental-US-and-Canada' ]
+    config_commands = ['vlan 3000', 'name 3000-test']
     net_connect.send_config_set(config_commands)
 
     # Verify config changes 
-    module.config_commands_output = net_connect.send_command('show run')
+    module.config_commands_output = net_connect.send_command('display vlan 3000')
+    
+    # Undo config changes 
+    net_connect.send_command('undo vlan 3000')
 
     net_connect.disconnect()
 
@@ -55,14 +51,14 @@ def test_disable_paging():
     Verify paging is disabled by looking for string after when paging would
     normally occur
     '''
-    assert 'Bottom of Log' in multiple_line_output
+    assert not '---- More ----' in multiple_line_output
 
 
 def test_verify_ssh_connect():
     '''
     Verify the connection was established successfully
     '''
-    assert 'Image stamp:' in show_version
+    assert 'HP Comware Software' in show_version
 
 
 def test_verify_send_command():
@@ -103,12 +99,8 @@ def test_normalize_linefeeds():
     assert not '\n\r' in show_version
 
 
-def test_enable_mode():
-    assert enable_prompt == EXPECTED_RESPONSES['enable_prompt']
-
-
 def test_command_set():
-    assert 'time timezone -480' in config_commands_output
+    assert 'Name: 3000-test' in config_commands_output
 
 
 def test_config_mode():
@@ -118,9 +110,3 @@ def test_config_mode():
 def test_exit_config_mode():
     assert not EXPECTED_RESPONSES['config_mode'] in exit_config_mode
 
-
-def test_strip_ansi_escape():
-    '''
-    Test that a long string comes back as expected
-    '''
-    assert '----  Bottom of Log : Events Listed = ' in multiple_line_output

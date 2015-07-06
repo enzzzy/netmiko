@@ -6,6 +6,8 @@ Example code showing how to use netmiko for multiprocessing.  Create a
 separate process for each ssh connection.  Each subprocess executes a
 'show version' command on the remote device.  Use a multiprocessing.queue to
 pass data from subprocess to parent process.
+
+Only supports Python2
 '''
 
 # Catch Paramiko warnings about libgmp and RandomPool
@@ -50,7 +52,6 @@ def print_output(results):
 def worker_show_version(a_device, mp_queue):
     '''
     Return a dictionary where the key is the device identifier
-
     Value is (success|fail(boolean), return_string)
     '''    
 
@@ -108,4 +109,3 @@ def main():
 if __name__ == '__main__':
 
     main()
-

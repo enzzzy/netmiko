@@ -1,28 +1,24 @@
 #!/usr/bin/env python
 
 import pytest
-import re
 
-import netmiko
+from netmiko import ConnectHandler
 from DEVICE_CREDS import *
 
 
 def setup_module(module):
 
     module.EXPECTED_RESPONSES = {
-        'base_prompt' : 'sf-arista-sw4',
-        'interface_ip'  : '10.220.88.31'
+        'base_prompt' : 'xe-test-rtr',
+        'interface_ip'  : '172.30.0.167',
     }
     
     show_ver_command = 'show version'
-    multiple_line_command = 'show logging'
     module.basic_command = 'show ip int brief'
     
-    SSHClass = netmiko.ssh_dispatcher(arista_veos_sw['device_type'])
-    net_connect = SSHClass(**arista_veos_sw)
-    module.show_version = net_connect.send_command(show_ver_command, delay_factor=2)
-    module.multiple_line_output = net_connect.send_command(multiple_line_command, delay_factor=4)
-    module.show_ip = net_connect.send_command(module.basic_command, delay_factor=2)
+    net_connect = ConnectHandler(**cisco_xe)
+    module.show_version = net_connect.send_command(show_ver_command)
+    module.show_ip = net_connect.send_command(module.basic_command)
     module.base_prompt = net_connect.base_prompt
 
 
@@ -31,14 +27,14 @@ def test_disable_paging():
     Verify paging is disabled by looking for string after when paging would
     normally occur
     '''
-    assert re.search(r'ztp.*debugging', multiple_line_output)
+    assert 'Configuration register is' in show_version
 
 
 def test_verify_ssh_connect():
     '''
     Verify the connection was established successfully
     '''
-    assert 'Arista' in show_version
+    assert 'Cisco IOS Software' in show_version
 
 
 def test_verify_send_command():

@@ -1,5 +1,6 @@
+from __future__ import unicode_literals
+
 from netmiko.base_connection import BaseSSHConnection
-from netmiko.netmiko_globals import MAX_BUFFER
 
 import time
 import re
@@ -14,9 +15,9 @@ class F5LtmSSH(BaseSSHConnection):
         self.disable_paging(command="\nset length 0\n")
         time.sleep(1)
 
-        self.tmsh_mode()        
+        self.tmsh_mode()
         self.set_base_prompt()
-       
+
 
     def tmsh_mode(self, delay_factor=1):
         '''
@@ -30,10 +31,11 @@ class F5LtmSSH(BaseSSHConnection):
         return None
 
 
-    def normalize_linefeeds(self, a_string):
+    @staticmethod
+    def normalize_linefeeds(a_string):
         '''
         Convert '\r\n' or '\r\r\n' to '\n, and remove '\r's in the text
-        '''    
+        '''
         newline = re.compile(r'(\r\n|\r\n\r\n|\r\r\n|\n\r|\r)')
 
         return newline.sub('\n', a_string)

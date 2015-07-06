@@ -1,7 +1,8 @@
-from netmiko.ssh_connection import SSHConnection
-from netmiko.netmiko_globals import MAX_BUFFER
-
+from __future__ import print_function
+from __future__ import unicode_literals
 import time
+from netmiko.ssh_connection import SSHConnection
+
 
 class HPProcurveSSH(SSHConnection):
 
@@ -27,16 +28,16 @@ class HPProcurveSSH(SSHConnection):
         Enter enable mode
         '''
 
-        DEBUG = False
+        debug = False
 
         output = self.send_command('enable')
-        if 'sername' in output:
+        if 'username' in output.lower():
             output += self.send_command(default_username)
-        if 'assword' in output:
+        if 'password' in output.lower():
             output += self.send_command(self.secret)
 
-        if DEBUG: 
-            print output
+        if debug:
+            print(output)
 
         self.set_base_prompt()
         self.clear_buffer()

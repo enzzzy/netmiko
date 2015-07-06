@@ -7,12 +7,16 @@ platforms (Cisco and non-Cisco).
 Also defines methods that should generally be supported by child classes
 '''
 
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import paramiko
 import time
 import socket
 import re
+import io
 
-from netmiko_globals import MAX_BUFFER
+from netmiko.netmiko_globals import MAX_BUFFER
 from netmiko.ssh_exception import NetMikoTimeoutException, NetMikoAuthenticationException
 
 
@@ -23,7 +27,8 @@ class BaseSSHConnection(object):
     Otherwise method left as a stub method.
     '''
 
-    def __init__(self, ip, username, password, secret='', port=22, device_type='', verbose=True):
+    def __init__(self, ip, username, password, secret='', port=22, device_type='', verbose=True,
+                 use_keys=False):
 
         self.ip = ip
         self.port = port
@@ -33,11 +38,10 @@ class BaseSSHConnection(object):
         self.device_type = device_type
         self.ansi_escape_codes = False
 
-        if not verbose:
-            self.establish_connection(verbose=False)
-        else:
-            self.establish_connection()
+        # set in set_base_prompt method
+        self.base_prompt = ''
 
+        self.establish_connection(verbose=verbose, use_keys=use_keys)
         self.session_preparation()
 
 
@@ -57,12 +61,14 @@ class BaseSSHConnection(object):
         self.set_base_prompt()
 
 
-    def establish_connection(self, sleep_time=3, verbose=True, timeout=8):
+    def establish_connection(self, sleep_time=3, verbose=True, timeout=8, use_keys=False):
         '''
         Establish SSH connection to the network device
 
         Timeout will generate a NetMikoTimeoutException
         Authentication failure will generate a NetMikoAuthenticationException
+
+        use_keys is a boolean that allows ssh-keys to be used for authentication
         '''
 
         # Create instance of SSHClient object
@@ -72,30 +78,32 @@ class BaseSSHConnection(object):
         self.remote_conn_pre.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
         # initiate SSH connection
-        if verbose: 
-            print "SSH connection established to {0}:{1}".format(self.ip, self.port)
-
         try:
             self.remote_conn_pre.connect(hostname=self.ip, port=self.port,
                                          username=self.username, password=self.password,
-                                         look_for_keys=False, allow_agent=False, timeout=timeout)
-        except socket.error as e:
+                                         look_for_keys=use_keys, allow_agent=False,
+                                         timeout=timeout)
+        except socket.error:
             msg = "Connection to device timed-out: {device_type} {ip}:{port}".format(
                 device_type=self.device_type, ip=self.ip, port=self.port)
             raise NetMikoTimeoutException(msg)
-        except paramiko.ssh_exception.AuthenticationException as e:
+        except paramiko.ssh_exception.AuthenticationException as auth_err:
             msg = "Authentication failure: unable to connect {device_type} {ip}:{port}".format(
                 device_type=self.device_type, ip=self.ip, port=self.port)
-            msg += '\n' + str(e)
+            msg += '\n' + str(auth_err)
             raise NetMikoAuthenticationException(msg)
+
+        if verbose:
+            print("SSH connection established to {0}:{1}".format(self.ip, self.port))
 
         # Use invoke_shell to establish an 'interactive session'
         self.remote_conn = self.remote_conn_pre.invoke_shell()
-        if verbose: print "Interactive SSH session established"
+        if verbose:
+            print("Interactive SSH session established")
 
         # Strip the initial router prompt
         time.sleep(sleep_time)
-        return self.remote_conn.recv(MAX_BUFFER)
+        return self.remote_conn.recv(MAX_BUFFER).decode('utf-8')
 
 
     def disable_paging(self, command="terminal length 0\n", delay_factor=.5):
@@ -107,36 +115,37 @@ class BaseSSHConnection(object):
         time.sleep(1*delay_factor)
 
         # Clear the buffer on the screen
-        output = self.remote_conn.recv(MAX_BUFFER)
+        output = self.remote_conn.recv(MAX_BUFFER).decode('utf-8')
         if self.ansi_escape_codes:
             output = self.strip_ansi_escape_codes(output)
 
         return output
 
 
-    def set_base_prompt(self, pri_prompt_terminator='#', alt_prompt_terminator='>', delay_factor=.5):
+    def set_base_prompt(self, pri_prompt_terminator='#',
+                        alt_prompt_terminator='>', delay_factor=.5):
         '''
         Sets self.base_prompt
 
         Used as delimiter for stripping of trailing prompt in output.
 
-        Should be set to something that is general and applies in multiple contexts. For Cisco 
+        Should be set to something that is general and applies in multiple contexts. For Cisco
         devices this will be set to router hostname (i.e. prompt without '>' or '#').
 
-        This will be set on entering user exec or privileged exec on Cisco, but not when 
+        This will be set on entering user exec or privileged exec on Cisco, but not when
         entering/exiting config mode
         '''
 
-        DEBUG = False
+        debug = False
 
-        if DEBUG: 
-            print "In set_base_prompt"
+        if debug:
+            print("In set_base_prompt")
 
         self.clear_buffer()
         self.remote_conn.send("\n")
         time.sleep(1*delay_factor)
 
-        prompt = self.remote_conn.recv(MAX_BUFFER)
+        prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8')
 
         # Some platforms have ANSI escape codes
         if self.ansi_escape_codes:
@@ -144,19 +153,24 @@ class BaseSSHConnection(object):
 
         prompt = self.normalize_linefeeds(prompt)
 
-        # If multiple lines in the output take the last line
-        prompt = prompt.split('\n')[-1]
-        prompt = prompt.strip()
+        try:
+            # If multiple lines in the output take the last line
+            prompt = prompt.split('\n')[-1]
+            prompt = prompt.strip()
 
-        # Check that ends with a valid terminator character
-        if not prompt[-1] in (pri_prompt_terminator, alt_prompt_terminator):
-            raise ValueError("Router prompt not found: {0}".format(self.base_prompt))
+            # Check that ends with a valid terminator character
+            if not prompt[-1] in (pri_prompt_terminator, alt_prompt_terminator):
+                raise ValueError()
+        except (IndexError, ValueError):
+            if debug:
+                print("Router prompt not found: {0}".format(prompt))
+            raise ValueError("Router prompt not found: {0}".format(prompt))
 
         # Strip off trailing terminator
         self.base_prompt = prompt[:-1]
 
-        if DEBUG: 
-            print "prompt: {}".format(self.base_prompt)
+        if debug:
+            print("prompt: {0}".format(self.base_prompt))
 
         return self.base_prompt
 
@@ -166,16 +180,16 @@ class BaseSSHConnection(object):
         Finds the current network device prompt, last line only
         '''
 
-        DEBUG = False
+        debug = False
 
-        if DEBUG: 
-            print "In find_prompt"
+        if debug:
+            print("In find_prompt")
 
         self.clear_buffer()
         self.remote_conn.send("\n")
         time.sleep(1*delay_factor)
 
-        prompt = self.remote_conn.recv(MAX_BUFFER)
+        prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8')
 
         # Some platforms have ANSI escape codes
         if self.ansi_escape_codes:
@@ -187,8 +201,8 @@ class BaseSSHConnection(object):
         prompt = prompt.split('\n')[-1]
         prompt = prompt.strip()
 
-        if DEBUG: 
-            print "prompt: {}".format(prompt)
+        if debug:
+            print("prompt: {}".format(prompt))
 
         return prompt
 
@@ -199,7 +213,7 @@ class BaseSSHConnection(object):
         '''
 
         if self.remote_conn.recv_ready():
-            return self.remote_conn.recv(MAX_BUFFER)
+            return self.remote_conn.recv(MAX_BUFFER).decode('utf-8')
         else:
             return None
 
@@ -218,10 +232,11 @@ class BaseSSHConnection(object):
         Returns the output of the command.
         '''
 
-        DEBUG = False
+        debug = False
         output = ''
 
-        if DEBUG: print 'In send_command'
+        if debug:
+            print('In send_command')
 
         self.clear_buffer()
 
@@ -229,7 +244,8 @@ class BaseSSHConnection(object):
         command_string = command_string.rstrip("\n")
         command_string += '\n'
 
-        if DEBUG: print "Command is: {}".format(command_string)
+        if debug:
+            print("Command is: {0}".format(command_string))
 
         self.remote_conn.send(command_string)
 
@@ -238,17 +254,12 @@ class BaseSSHConnection(object):
         i = 1
 
         while (not_done) and (i <= max_loops):
-
-            if DEBUG: print "In while loop"
             time.sleep(1*delay_factor)
             i += 1
-
             # Keep reading data as long as available (up to max_loops)
             if self.remote_conn.recv_ready():
-                if DEBUG: print "recv_ready = True"
-                output += self.remote_conn.recv(MAX_BUFFER)
+                output += self.remote_conn.recv(MAX_BUFFER).decode('utf-8')
             else:
-                if DEBUG: print "recv_ready = False"
                 not_done = False
 
         # Some platforms have ansi_escape codes
@@ -260,7 +271,8 @@ class BaseSSHConnection(object):
         if strip_prompt:
             output = self.strip_prompt(output)
 
-        if DEBUG: print output
+        if debug:
+            print(output)
         return output
 
 
@@ -278,7 +290,91 @@ class BaseSSHConnection(object):
             return a_string
 
 
-    def strip_command(self, command_string, output):
+    def send_command_expect(self, command_string, expect_string=None,
+                            delay_factor=.5, max_loops=240,
+                            strip_prompt=True, strip_command=True):
+        '''
+        Send command to network device retrieve output until router_prompt or expect_string
+
+        By default this method will keep waiting to receive data until the network device prompt is
+        detected. The network device prompt will be determined by the find_prompt() method.
+
+        command_string = command to execute
+        expect_string = pattern to search for in output
+        delay_factor = decrease the initial delay before we start looking for data
+        max_loops = number of iterations before we give up and raise an exception
+        strip_prompt = strip the trailing prompt from the output
+        strip_command = strip the leading command from the output
+        '''
+
+        debug = False
+        output = ''
+
+        # Ensure there is a newline at the end of the command
+        command_string = command_string.rstrip("\n")
+        command_string += '\n'
+
+        if expect_string is None:
+            search_pattern = self.find_prompt()
+            time.sleep(delay_factor*1)
+        else:
+            search_pattern = expect_string
+
+        self.clear_buffer()
+
+        if debug:
+            print("Command is: {0}".format(command_string))
+            print("Search to stop receiving data is: '{0}'".format(search_pattern))
+
+        self.remote_conn.send(command_string)
+
+        # Initial delay after sending command
+        time.sleep(delay_factor*1)
+
+        i = 1
+        # Keep reading data until search_pattern is found (or max_loops)
+        while i <= max_loops:
+
+            if debug:
+                print("In while loop")
+
+            if self.remote_conn.recv_ready():
+                if debug:
+                    print("recv_ready = True")
+                output += self.remote_conn.recv(MAX_BUFFER).decode('utf-8')
+                if search_pattern in output:
+                    break
+            else:
+                if debug:
+                    print("recv_ready = False")
+                # No data, wait a little bit
+                time.sleep(delay_factor*1)
+
+            i += 1
+
+        else:   # nobreak
+            # search_pattern never found
+            raise IOError("Search pattern never detected in send_command_expect: {0}".format(
+                search_pattern))
+
+
+        # Some platforms have ansi_escape codes
+        if self.ansi_escape_codes:
+            output = self.strip_ansi_escape_codes(output)
+        output = self.normalize_linefeeds(output)
+        if strip_command:
+            output = self.strip_command(command_string, output)
+        if strip_prompt:
+            output = self.strip_prompt(output)
+
+        if debug:
+            print(output)
+
+        return output
+
+
+    @staticmethod
+    def strip_command(command_string, output):
         '''
         Strip command_string from output string
         '''
@@ -287,7 +383,8 @@ class BaseSSHConnection(object):
         return output[command_length:]
 
 
-    def normalize_linefeeds(self, a_string):
+    @staticmethod
+    def normalize_linefeeds(a_string):
         '''
         Convert '\r\r\n','\r\n', '\n\r' to '\n
         '''
@@ -298,43 +395,103 @@ class BaseSSHConnection(object):
 
 
     def enable(self):
-        pass
+        """Disable 'enable()' method."""
+        raise AttributeError("Network device does not support 'enable()' method")
 
 
-    def exit_enable_mode(self):
-        pass
+    def exit_enable_mode(self, exit_command=''):
+        """Disable 'exit_enable_mode()' method."""
+        raise AttributeError("Network device does not support 'exit_enable_mode()' method")
 
 
-    def config_mode(self):
-        return ''
-
-
-    def exit_config_mode(self):
-        return ''
-
-
-    def check_enable_mode(self):
-        pass
-
-
-    def check_config_mode(self):
-        pass
-
-
-    def send_config_set(self, config_commands=None, commit=False):
+    def config_mode(self, config_command=''):
         '''
-        Send in a set of configuration commands as a list
+        Enter into config_mode.
 
-        The commands will be executed one after the other
+        First check whether currently already in configuration mode.
+        Enter config mode (if necessary)
+        '''
+        output = ''
+        if not self.check_config_mode():
+            output = self.send_command(config_command, strip_prompt=False, strip_command=False)
+            if not self.check_config_mode():
+                raise ValueError("Failed to enter configuration mode")
+
+        return output
+
+
+    def exit_config_mode(self, exit_config=''):
+        '''
+        Exit from configuration mode.
+        '''
+        output = ''
+        if self.check_config_mode():
+            output = self.send_command(exit_config, strip_prompt=False, strip_command=False)
+            if self.check_config_mode():
+                raise ValueError("Failed to exit configuration mode")
+
+        return output
+
+
+    def check_enable_mode(self, check_string=''):
+        """Disable 'check_enable_mode()' method."""
+        raise AttributeError("Network device does not support 'check_enable_mode()' method")
+
+
+    def check_config_mode(self, check_string=''):
+        '''
+        Checks if the device is in configuration mode or not
+
+        Returns a boolean
+        '''
+        output = self.send_command('\n', strip_prompt=False, strip_command=False)
+        if check_string in output:
+            return True
+        else:
+            return False
+
+
+    def send_config_from_file(self, config_file=None, **kwargs):
+        '''
+        Send configuration commands down the SSH channel from a file.
+
+        The file is processed line-by-line and each command is sent down the
+        SSH channel.
+
+        **kwargs are passed to send_config_set method.
+        '''
+
+        try:
+            with io.open(config_file, encoding='utf-8') as cfg_file:
+                return self.send_config_set(cfg_file, **kwargs)
+        except IOError:
+            print("I/O Error opening config file: {0}".format(config_file))
+
+        return ''
+
+
+    def send_config_set(self, config_commands=None, exit_config_mode=True, **kwargs):
+        '''
+        Send group of configuration commands down the SSH channel.
+
+        config_commands is an iterable containing all of the configuration commands.
+        The commands will be executed one after the other.
 
         Automatically exits/enters configuration mode.
+
+        **kwargs will allow passing of all the arguments to send_command
+        strip_prompt and strip_command will be set to False if not explicitly set in
+        the method call.
         '''
 
-        DEBUG = False
-        output = ''
+        debug = False
 
         if config_commands is None:
             return ''
+
+        # Set strip_prompt and strip_command to default to False
+        kwargs.setdefault('strip_prompt', False)
+        kwargs.setdefault('strip_command', False)
 
         # Config commands must be iterable, but not a string
         if not hasattr(config_commands, '__iter__'):
@@ -344,59 +501,63 @@ class BaseSSHConnection(object):
         output = self.config_mode()
 
         for a_command in config_commands:
-            output += self.send_command(a_command, strip_prompt=False, strip_command=False)
+            output += self.send_command(a_command, **kwargs)
 
-        if commit:
-            output += self.commit()
+        if exit_config_mode:
+            output += self.exit_config_mode()
 
-        output += self.exit_config_mode()
-
-        if DEBUG: 
-            print output
+        if debug:
+            print(output)
 
         return output
 
 
-    def strip_ansi_escape_codes(self, string_buffer):
+    @staticmethod
+    def strip_ansi_escape_codes(string_buffer):
         '''
         Remove any ANSI (VT100) ESC codes from the output
+
+        http://en.wikipedia.org/wiki/ANSI_escape_code
 
         Note: this does not capture ALL possible ANSI Escape Codes only the ones
         I have encountered
 
         Current codes that are filtered:
-        ^[[24;27H   Position cursor
-        ^[[?25h     Show the cursor
-        ^[E         Next line
-        ^[[2K       Erase line
-        ^[[1;24r    Enable scrolling from start to row end
-        0x1b = is the escape character [^ in hex
+        ESC = '\x1b' or chr(27)
+        ESC = is the escape character [^ in hex ('\x1b')
+        ESC[24;27H   Position cursor
+        ESC[?25h     Show the cursor
+        ESC[E        Next line (HP does ESC-E)
+        ESC[2K       Erase line
+        ESC[1;24r    Enable scrolling from start to row end
 
         HP ProCurve's and F5 LTM's require this (possible others)
         '''
 
-        DEBUG = False
-        if DEBUG: print "In strip_ansi_escape_codes"
-        if DEBUG: print "repr = %s" % repr(string_buffer)
+        debug = False
+        if debug:
+            print("In strip_ansi_escape_codes")
+        if debug:
+            print("repr = %s" % repr(string_buffer))
 
-        CODE_POSITION_CURSOR = '\x1b\[\d+;\d+H'
-        CODE_SHOW_CURSOR = '\x1b\[\?25h'
-        CODE_NEXT_LINE = '\x1bE'
-        CODE_ERASE_LINE = '\x1b\[2K'
-        CODE_ENABLE_SCROLL = '\x1b\[\d+;\d+r'
+        code_position_cursor = chr(27) + r'\[\d+;\d+H'
+        code_show_cursor = chr(27) + r'\[\?25h'
+        code_next_line = chr(27) + r'E'
+        code_erase_line = chr(27) + r'\[2K'
+        code_enable_scroll = chr(27) + r'\[\d+;\d+r'
 
-        CODE_SET = [CODE_POSITION_CURSOR, CODE_SHOW_CURSOR, CODE_ERASE_LINE, CODE_ENABLE_SCROLL]
+        code_set = [code_position_cursor, code_show_cursor, code_erase_line, code_enable_scroll]
 
         output = string_buffer
-        for ansi_esc_code in CODE_SET:
+        for ansi_esc_code in code_set:
             output = re.sub(ansi_esc_code, '', output)
 
         # CODE_NEXT_LINE must substitute with '\n'
-        output = re.sub(CODE_NEXT_LINE, '\n', output)
+        output = re.sub(code_next_line, '\n', output)
 
-        if DEBUG:
-            print "new_output = %s" % output
-            print "repr = %s" % repr(output)
+        if debug:
+            print("new_output = %s" % output)
+            print("repr = %s" % repr(output))
 
         return output
 
@@ -421,4 +582,4 @@ class BaseSSHConnection(object):
         '''
         Commit method for platforms that support this
         '''
-        return ''
+        raise AttributeError("Network device does not support 'commit()' method")

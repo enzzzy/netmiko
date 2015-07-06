@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+'''
+Explictly use ssh_dispatcher to select SSH class
+'''
 
 import pytest
 
@@ -10,23 +13,22 @@ from DEVICE_CREDS import *
 def setup_module(module):
 
     module.EXPECTED_RESPONSES = {
-        'base_prompt'    : 'root@pynet-jnpr-srx1',
-        'router_prompt'    : 'root@pynet-jnpr-srx1>',
-        'router_conf_mode'  : 'root@pynet-jnpr-srx1#',
-        'interface_ip'      : '10.220.88.39',
+        'base_prompt' : 'pynet-rtr1',
+        'interface_ip'  : '10.220.88.20'
     }
     
     show_ver_command = 'show version'
-    multiple_line_command = 'show configuration'
-    module.basic_command = 'show interfaces terse'
-    
-    SSHClass = netmiko.ssh_dispatcher(juniper_srx['device_type'])
-    net_connect = SSHClass(**juniper_srx)
+    module.basic_command = 'show ip int brief'
+   
+    SSHClass = netmiko.ssh_dispatcher(device_type=cisco_881['device_type']) 
+    net_connect = SSHClass(**cisco_881)
 
     module.show_version = net_connect.send_command(show_ver_command)
-    module.multiple_line_output = net_connect.send_command(multiple_line_command, delay_factor=2)
     module.show_ip = net_connect.send_command(module.basic_command)
     module.base_prompt = net_connect.base_prompt
+
+    module.show_ip_alt = net_connect.send_command_expect(module.basic_command)
+    module.show_version_alt = net_connect.send_command_expect(show_ver_command)
 
     # Test buffer clearing
     net_connect.remote_conn.send(show_ver_command)
@@ -41,26 +43,33 @@ def test_disable_paging():
     Verify paging is disabled by looking for string after when paging would
     normally occur
     '''
-    assert 'security-zone untrust' in multiple_line_output
+    assert 'Configuration register is' in show_version
 
 
-def test_verify_ssh_connect():
+def test_ssh_connect():
     '''
     Verify the connection was established successfully
     '''
-    assert 'JUNOS Software Release' in show_version
+    assert 'Cisco IOS Software' in show_version
 
 
-def test_verify_send_command():
+def test_send_command():
     '''
     Verify a command can be sent down the channel successfully
     '''
     assert EXPECTED_RESPONSES['interface_ip'] in show_ip
 
 
+def test_send_command_expect():
+    '''
+    Verify a command can be sent down the channel successfully
+    '''
+    assert EXPECTED_RESPONSES['interface_ip'] in show_ip_alt
+
+
 def test_base_prompt():
     '''
-    Verify the router base_prompt is detected correctly
+    Verify the router prompt is detected correctly
     '''
     assert base_prompt == EXPECTED_RESPONSES['base_prompt']
 
@@ -69,7 +78,8 @@ def test_strip_prompt():
     '''
     Ensure the router prompt is not in the command output
     '''
-    assert EXPECTED_RESPONSES['base_prompt'] not in show_version
+    assert EXPECTED_RESPONSES['base_prompt'] not in show_ip
+    assert EXPECTED_RESPONSES['base_prompt'] not in show_ip_alt
 
 
 def test_strip_command():
@@ -78,13 +88,15 @@ def test_strip_command():
     command output
     '''
     assert basic_command not in show_ip
+    assert basic_command not in show_ip_alt
 
 
 def test_normalize_linefeeds():
     '''
-    Ensure no '\r' sequences
+    Ensure no '\r\n' sequences
     '''
-    assert not '\r' in show_ip
+    assert not '\r\n' in show_version
+    assert not '\r\n' in show_version_alt
 
 
 def test_clear_buffer():
@@ -92,3 +104,4 @@ def test_clear_buffer():
     Test that clearing the buffer works
     '''
     assert clear_buffer_check is None
+

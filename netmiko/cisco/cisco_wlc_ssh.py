@@ -1,11 +1,16 @@
+from __future__ import print_function
+from __future__ import unicode_literals
+import time
+
 from netmiko.ssh_connection import BaseSSHConnection
 from netmiko.netmiko_globals import MAX_BUFFER
 from netmiko.ssh_exception import NetMikoTimeoutException, NetMikoAuthenticationException
-import time
+import paramiko
+import socket
 
 class CiscoWlcSSH(BaseSSHConnection):
 
-    def establish_connection(self, sleep_time=3, verbose=True, timeout=8):
+    def establish_connection(self, sleep_time=3, verbose=True, timeout=8, use_keys=False):
         '''
         Establish SSH connection to the network device
 
@@ -21,8 +26,8 @@ class CiscoWlcSSH(BaseSSHConnection):
         User: user
 
         Password:****
-       
-        Manually send username/password to work around this. 
+
+        Manually send username/password to work around this.
         '''
 
         # Create instance of SSHClient object
@@ -33,12 +38,13 @@ class CiscoWlcSSH(BaseSSHConnection):
 
         # initiate SSH connection
         if verbose:
-            print "SSH connection established to {0}:{1}".format(self.ip, self.port)
+            print("SSH connection established to {0}:{1}".format(self.ip, self.port))
 
         try:
             self.remote_conn_pre.connect(hostname=self.ip, port=self.port,
                                          username=self.username, password=self.password,
-                                         look_for_keys=False, allow_agent=False, timeout=timeout)
+                                         look_for_keys=use_keys, allow_agent=False,
+                                         timeout=timeout)
         except socket.error as e:
             msg = "Connection to device timed-out: {device_type} {ip}:{port}".format(
                 device_type=self.device_type, ip=self.ip, port=self.port)
@@ -56,8 +62,8 @@ class CiscoWlcSSH(BaseSSHConnection):
         self.remote_conn.send(self.username + '\n')
         time.sleep(.2)
         self.remote_conn.send(self.password + '\n')
-        if verbose: 
-            print "Interactive SSH session established"
+        if verbose:
+            print("Interactive SSH session established")
 
         # Strip the initial router prompt
         time.sleep(sleep_time)
